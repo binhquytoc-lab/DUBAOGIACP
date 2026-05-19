@@ -1,9 +1,3 @@
-# app.py
-
-# =========================
-# IMPORT THƯ VIỆN
-# =========================
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -16,50 +10,57 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
 # =========================
-# GIAO DIỆN WEB
+# GIAO DIỆN
 # =========================
 
-st.title("Dự báo giá cổ phiếu 10 ngày tới bằng LSTM")
+st.title("Dự báo giá cổ phiếu bằng LSTM")
 
-st.write("Nhập mã cổ phiếu Việt Nam ví dụ: ACB.VN, FPT.VN, HPG.VN")
-
-ticker = st.text_input("Nhập mã cổ phiếu", "ACB.VN")
+ticker = st.text_input(
+    "Nhập mã cổ phiếu",
+    "ACB.VN"
+)
 
 # =========================
-# NÚT DỰ BÁO
+# BUTTON
 # =========================
 
 if st.button("Dự báo"):
 
     # =========================
-    # LẤY DỮ LIỆU
+    # DOWNLOAD DATA
     # =========================
 
     df = yf.download(
         ticker,
         start="2018-01-01",
-        end="2025-04-11"
+        end="2025-04-11",
+        auto_adjust=True
     )
 
-    # Kiểm tra dữ liệu
+    # =========================
+    # KIỂM TRA DATA
+    # =========================
 
-    if len(df) == 0:
-        st.error("Không tìm thấy mã cổ phiếu")
+    if df.empty:
+        st.error("Không tìm thấy dữ liệu")
         st.stop()
 
-    # =========================
-    # GIÁ CLOSE
-    # =========================
-
-    data = df[['Close']].values
+    st.write(df.tail())
 
     # =========================
-    # CHIA TRAIN / TEST
+    # LẤY CLOSE PRICE
     # =========================
 
-    train_size = int(0.8 * len(data))
+    data = df['Close'].values.reshape(-1,1)
+
+    # =========================
+    # TRAIN TEST
+    # =========================
+
+    train_size = int(len(data) * 0.8)
 
     train_data = data[:train_size]
+
     test_data = data[train_size:]
 
     # =========================
@@ -73,7 +74,7 @@ if st.button("Dự báo"):
     test_scaled = scaler.transform(test_data)
 
     # =========================
-    # TẠO SEQUENCE
+    # CREATE SEQUENCE
     # =========================
 
     def create_sequences(data, window_size=60):
@@ -89,20 +90,20 @@ if st.button("Dự báo"):
 
         return np.array(X), np.array(y)
 
-    # Train
-
     X_train, y_train = create_sequences(train_scaled)
 
-    # Reshape
+    # =========================
+    # RESHAPE
+    # =========================
 
     X_train = X_train.reshape(
-        (X_train.shape[0],
-         X_train.shape[1],
-         1)
+        X_train.shape[0],
+        X_train.shape[1],
+        1
     )
 
     # =========================
-    # XÂY DỰNG LSTM
+    # MODEL
     # =========================
 
     model = Sequential()
@@ -125,10 +126,10 @@ if st.button("Dự báo"):
     )
 
     # =========================
-    # TRAIN MODEL
+    # TRAIN
     # =========================
 
-    with st.spinner("Đang train mô hình LSTM..."):
+    with st.spinner("Đang train model..."):
 
         model.fit(
             X_train,
@@ -138,10 +139,10 @@ if st.button("Dự báo"):
             verbose=0
         )
 
-    st.success("Train mô hình thành công!")
+    st.success("Train thành công!")
 
     # =========================
-    # DỰ BÁO 10 NGÀY TỚI
+    # FUTURE PREDICTION
     # =========================
 
     last_60_days = np.vstack(
@@ -159,7 +160,9 @@ if st.button("Dự báo"):
             verbose=0
         )
 
-        future_predictions.append(next_pred[0,0])
+        future_predictions.append(
+            next_pred[0,0]
+        )
 
         last_60_days = np.append(
             last_60_days[:,1:,:],
@@ -180,39 +183,45 @@ if st.button("Dự báo"):
     )
 
     # =========================
-    # HIỂN THỊ KẾT QUẢ
+    # DATAFRAME
     # =========================
 
-    st.subheader("Giá dự báo 10 ngày tới")
-
     future_df = pd.DataFrame({
+
         "Ngày": range(1,11),
-        "Giá dự báo": future_predictions.flatten()
+
+        "Giá dự báo":
+        future_predictions.flatten()
+
     })
+
+    st.subheader("Dự báo 10 ngày tới")
 
     st.dataframe(future_df)
 
     # =========================
-    # VẼ BIỂU ĐỒ
+    # PLOT
     # =========================
-
-    st.subheader("Biểu đồ dự báo")
 
     fig, ax = plt.subplots(figsize=(12,6))
 
     ax.plot(
+
         range(1,11),
-        future_predictions,
+
+        future_predictions.flatten(),
+
         marker='o'
+
+    )
+
+    ax.set_title(
+        f"Dự báo giá {ticker}"
     )
 
     ax.set_xlabel("Ngày")
 
-    ax.set_ylabel("Giá cổ phiếu")
-
-    ax.set_title(
-        f"Dự báo giá cổ phiếu {ticker} trong 10 ngày tới"
-    )
+    ax.set_ylabel("Giá")
 
     ax.grid(True)
 
