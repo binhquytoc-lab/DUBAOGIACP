@@ -1,3 +1,7 @@
+# =========================
+# IMPORT THƯ VIỆN
+# =========================
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -6,172 +10,211 @@ import matplotlib.pyplot as plt
 
 from sklearn.preprocessing import MinMaxScaler
 
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+import torch
+import torch.nn as nn
 
 # =========================
-# GIAO DIỆN
+# GIAO DIỆN STREAMLIT
 # =========================
 
-st.title("Dự báo giá cổ phiếu bằng LSTM")
+st.title("Dự báo giá cổ phiếu 10 ngày bằng PyTorch LSTM")
 
-ticker = st.text_input(
-    "Nhập mã cổ phiếu",
-    "ACB.VN"
-)
+st.write("Ứng dụng AI dự báo giá cổ phiếu bằng LSTM + PyTorch")
 
 # =========================
-# BUTTON
+# NHẬP MÃ CỔ PHIẾU
+# =========================
+
+ticker = st.text_input("Nhập mã cổ phiếu:", "AAPL")
+
+# =========================
+# NÚT DỰ BÁO
 # =========================
 
 if st.button("Dự báo"):
 
     # =========================
-    # DOWNLOAD DATA
+    # TẢI DỮ LIỆU
     # =========================
 
     df = yf.download(
         ticker,
         start="2018-01-01",
-        end="2025-04-11",
-        auto_adjust=True
+        end="2025-01-01"
     )
 
     # =========================
-    # KIỂM TRA DATA
+    # KIỂM TRA DỮ LIỆU
     # =========================
 
     if df.empty:
-        st.error("Không tìm thấy dữ liệu")
+        st.error("Không tìm thấy mã cổ phiếu")
         st.stop()
 
-    st.write(df.tail())
-
     # =========================
-    # LẤY CLOSE PRICE
+    # GIÁ ĐÓNG CỬA
     # =========================
 
-    data = df['Close'].values.reshape(-1,1)
+    data = df[['Close']]
 
     # =========================
-    # TRAIN TEST
+    # HIỂN THỊ DỮ LIỆU
     # =========================
 
-    train_size = int(len(data) * 0.8)
+    st.subheader("Dữ liệu cổ phiếu")
 
-    train_data = data[:train_size]
-
-    test_data = data[train_size:]
+    st.write(data.tail())
 
     # =========================
-    # SCALE
+    # BIỂU ĐỒ GIÁ
     # =========================
 
-    scaler = MinMaxScaler()
+    st.subheader("Biểu đồ giá đóng cửa")
 
-    train_scaled = scaler.fit_transform(train_data)
+    fig = plt.figure(figsize=(12,6))
 
-    test_scaled = scaler.transform(test_data)
+    plt.plot(data)
 
-    # =========================
-    # CREATE SEQUENCE
-    # =========================
+    plt.xlabel("Thời gian")
 
-    def create_sequences(data, window_size=60):
+    plt.ylabel("Giá")
 
-        X = []
-        y = []
-
-        for i in range(window_size, len(data)):
-
-            X.append(data[i-window_size:i])
-
-            y.append(data[i])
-
-        return np.array(X), np.array(y)
-
-    X_train, y_train = create_sequences(train_scaled)
+    st.pyplot(fig)
 
     # =========================
-    # RESHAPE
+    # CHUẨN HÓA DỮ LIỆU
     # =========================
 
-    X_train = X_train.reshape(
-        X_train.shape[0],
-        X_train.shape[1],
-        1
+    scaler = MinMaxScaler(feature_range=(0,1))
+
+    scaled_data = scaler.fit_transform(data)
+
+    # =========================
+    # TẠO DATASET
+    # =========================
+
+    sequence_length = 60
+
+    X = []
+    y = []
+
+    for i in range(sequence_length, len(scaled_data)):
+        X.append(scaled_data[i-sequence_length:i])
+        y.append(scaled_data[i])
+
+    X = np.array(X)
+    y = np.array(y)
+
+    # =========================
+    # CHUYỂN SANG TENSOR
+    # =========================
+
+    X_train = torch.tensor(X, dtype=torch.float32)
+
+    y_train = torch.tensor(y, dtype=torch.float32)
+
+    # =========================
+    # XÂY DỰNG MÔ HÌNH LSTM
+    # =========================
+
+    class LSTMModel(nn.Module):
+
+        def __init__(self):
+            super(LSTMModel, self).__init__()
+
+            self.lstm = nn.LSTM(
+                input_size=1,
+                hidden_size=50,
+                num_layers=2,
+                batch_first=True
+            )
+
+            self.fc = nn.Linear(50,1)
+
+        def forward(self, x):
+
+            out, _ = self.lstm(x)
+
+            out = out[:, -1, :]
+
+            out = self.fc(out)
+
+            return out
+
+    # =========================
+    # KHỞI TẠO MODEL
+    # =========================
+
+    model = LSTMModel()
+
+    # =========================
+    # LOSS & OPTIMIZER
+    # =========================
+
+    criterion = nn.MSELoss()
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=0.001
     )
 
     # =========================
-    # MODEL
+    # TRAIN MODEL
     # =========================
 
-    model = Sequential()
+    epochs = 10
 
-    model.add(
-        LSTM(
-            50,
-            return_sequences=True,
-            input_shape=(60,1)
-        )
-    )
+    progress_bar = st.progress(0)
 
-    model.add(LSTM(50))
+    for epoch in range(epochs):
 
-    model.add(Dense(1))
+        outputs = model(X_train)
 
-    model.compile(
-        optimizer='adam',
-        loss='mean_squared_error'
-    )
+        loss = criterion(outputs, y_train)
 
-    # =========================
-    # TRAIN
-    # =========================
+        optimizer.zero_grad()
 
-    with st.spinner("Đang train model..."):
+        loss.backward()
 
-        model.fit(
-            X_train,
-            y_train,
-            epochs=5,
-            batch_size=32,
-            verbose=0
-        )
+        optimizer.step()
 
-    st.success("Train thành công!")
+        progress_bar.progress((epoch + 1) / epochs)
+
+    st.success("Train model thành công!")
 
     # =========================
-    # FUTURE PREDICTION
+    # DỰ BÁO 10 NGÀY TỚI
     # =========================
 
-    last_60_days = np.vstack(
-        (train_scaled, test_scaled)
-    )[-60:]
-
-    last_60_days = last_60_days.reshape(1,60,1)
+    last_60_days = scaled_data[-60:]
 
     future_predictions = []
 
+    current_input = last_60_days.copy()
+
     for i in range(10):
 
-        next_pred = model.predict(
-            last_60_days,
-            verbose=0
+        input_data = torch.tensor(
+            current_input.reshape(1,60,1),
+            dtype=torch.float32
         )
 
-        future_predictions.append(
-            next_pred[0,0]
-        )
+        with torch.no_grad():
 
-        last_60_days = np.append(
-            last_60_days[:,1:,:],
-            next_pred.reshape(1,1,1),
-            axis=1
+            prediction = model(input_data)
+
+        predicted_value = prediction.numpy()[0][0]
+
+        future_predictions.append(predicted_value)
+
+        current_input = np.append(
+            current_input[1:],
+            [[predicted_value]],
+            axis=0
         )
 
     # =========================
-    # INVERSE SCALE
+    # CHUYỂN VỀ GIÁ THẬT
     # =========================
 
     future_predictions = np.array(
@@ -183,46 +226,43 @@ if st.button("Dự báo"):
     )
 
     # =========================
-    # DATAFRAME
+    # HIỂN THỊ KẾT QUẢ
     # =========================
 
-    future_df = pd.DataFrame({
+    st.subheader("Dự báo giá 10 ngày tới")
 
-        "Ngày": range(1,11),
-
-        "Giá dự báo":
-        future_predictions.flatten()
-
-    })
-
-    st.subheader("Dự báo 10 ngày tới")
-
-    st.dataframe(future_df)
-
-    # =========================
-    # PLOT
-    # =========================
-
-    fig, ax = plt.subplots(figsize=(12,6))
-
-    ax.plot(
-
-        range(1,11),
-
-        future_predictions.flatten(),
-
-        marker='o'
-
+    prediction_df = pd.DataFrame(
+        future_predictions,
+        columns=['Giá dự báo']
     )
 
-    ax.set_title(
-        f"Dự báo giá {ticker}"
+    st.write(prediction_df)
+
+    # =========================
+    # VẼ BIỂU ĐỒ DỰ BÁO
+    # =========================
+
+    st.subheader("Biểu đồ dự báo")
+
+    fig2 = plt.figure(figsize=(12,6))
+
+    plt.plot(
+        range(len(data)),
+        data.values,
+        label='Giá lịch sử'
     )
 
-    ax.set_xlabel("Ngày")
+    future_x = range(
+        len(data),
+        len(data) + 10
+    )
 
-    ax.set_ylabel("Giá")
+    plt.plot(
+        future_x,
+        future_predictions,
+        label='Dự báo 10 ngày'
+    )
 
-    ax.grid(True)
+    plt.legend()
 
-    st.pyplot(fig)
+    st.pyplot(fig2)
